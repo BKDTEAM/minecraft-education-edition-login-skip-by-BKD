@@ -121,14 +121,14 @@ int main(int argc, char* argv[])
 		printf_s("Failed, using default pointer path (MCEE 1.12.60 UWP x64)\n");
 		num_ptr = 8;
 		pointer_path = (int*)malloc(num_ptr * sizeof(int));
-
-		pointer_path[0] = 0x025949E0;
-		pointer_path[1] = 0x120;
-		pointer_path[2] = 0x08;
-		pointer_path[3] = 0x38;
-		pointer_path[4] = 0x30;
-		pointer_path[5] = 0x58;
-		pointer_path[6] = 0x480;
+        
+		pointer_path[0] = 0x2594A58;
+		pointer_path[1] = 0x60;
+		pointer_path[2] = 0x138;
+		pointer_path[3] = 0x58;
+		pointer_path[4] = 0x480;
+		pointer_path[5] = 0x10;
+		pointer_path[6] = 0xA8;
 		pointer_path[7] = 0x0;
 	}
 
