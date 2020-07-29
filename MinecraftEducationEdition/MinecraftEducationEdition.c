@@ -8,8 +8,11 @@
 int* pointer_path;
 int num_ptr;
 
-
-HMODULE* GetProcessBaseAddress(HANDLE process) // from stackoverflow
+#ifdef _WIN64
+unsigned long long int GetProcessBaseAddress(HANDLE process) // from stackoverflow
+#else
+unsigned int GetProcessBaseAddress(HANDLE process) // from stackoverflow
+#endif
 {
 	DWORD_PTR   baseAddress = 0;
 	HANDLE      processHandle = OpenProcess(PROCESS_ALL_ACCESS,TRUE,process);
@@ -30,7 +33,12 @@ HMODULE* GetProcessBaseAddress(HANDLE process) // from stackoverflow
 					int moduleCount;
 
 					moduleCount = bytesRequired / sizeof(HMODULE);
-					moduleArray = (HMODULE*)moduleArrayBytes;
+					#ifdef _WIN64
+					moduleArray = (unsigned int*)moduleArrayBytes;
+					#else
+					moduleArray = (unsigned long long int*)moduleArrayBytes;
+					#endif
+
 
 					if (EnumProcessModules(processHandle, moduleArray, bytesRequired, &bytesRequired))
 					{
@@ -160,7 +168,7 @@ int main(int argc, char* argv[])
 	long long int baseAddress = (long long int)GetProcessBaseAddress(proc_id);
 	printf_s("MCEE Base Addr: %llx\n", baseAddress);
 	#else
-	int baseAddress = (int)GetProcessBaseAddress(hProcess);
+	int baseAddress = (int)GetProcessBaseAddress(proc_id);
 	printf_s("MCEE Base Addr: %x\n", baseAddress);
 	#endif
 	
@@ -175,9 +183,11 @@ int main(int argc, char* argv[])
          #ifdef _WIN64
 		long long int cur_ptr = baseAddress + pointer_path[0];
 		long long int ptr = 0;
+		long long int new_ptr = 0;
 		#else
 		int cur_ptr = baseAddress + pointer_path[0];
 		int ptr = 0;
+		int new_ptr = 0;
 		#endif
 
 		while (ptr == 0)
@@ -193,11 +203,7 @@ int main(int argc, char* argv[])
 
 		for (int i = 1; i < num_ptr-1; i++) // Follow path...
 		{
-			#ifdef _WIN64
-			long long int new_ptr = 0;
-			#else
-			int new_ptr = 0;
-			#endif
+
 
 			cur_ptr = ptr + pointer_path[i];
 			#ifdef _WIN64
