@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <windows.h>
 #include <psapi.h>
+#include <wchar.h>
+#include <string.h>
 #include <TlHelp32.h>
 
 int* pointer_path;
@@ -48,9 +50,30 @@ uintptr_t GetProcessBaseAddress(HANDLE process) // from stackoverflow
 	return baseAddress;
 }
 
+DWORD GetProcId(WCHAR* name)
+{
+	PROCESSENTRY32 entry;
+	entry.dwSize = sizeof(PROCESSENTRY32);
+
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL);
+
+	if (Process32First(snapshot, &entry) == TRUE)
+	{
+		while (Process32Next(snapshot, &entry) == TRUE)
+		{
+			if (wcscmp(entry.szExeFile, name) == 0)
+			{
+				return entry.th32ProcessID;
+			}
+		}
+	}
+
+	CloseHandle(snapshot);
+	return NULL;
+}
+
 int main(int argc, char* argv[])
 {
-	HWND hWnd = NULL;
 	FILE* ptr_file;
 	char MEE_POINTER_FILE[0x2048];
 	int LOGIN_STEP_VALUE = -1;
@@ -140,12 +163,12 @@ int main(int argc, char* argv[])
 		num_ptr = 8;
 		pointer_path = (int*)malloc(num_ptr * sizeof(int));
         
-		pointer_path[0] = 0x2594A58;
-		pointer_path[1] = 0x60;
-		pointer_path[2] = 0x138;
-		pointer_path[3] = 0x58;
-		pointer_path[4] = 0x480;
-		pointer_path[5] = 0x10;
+		pointer_path[0] = 0x2CFFF40;
+		pointer_path[1] = 0x30;
+		pointer_path[2] = 0x8;
+		pointer_path[3] = 0x20;
+		pointer_path[4] = 0x570;
+		pointer_path[5] = 0x18;
 		pointer_path[6] = 0xA8;
 		pointer_path[7] = 0x0;
 	}
@@ -162,21 +185,19 @@ int main(int argc, char* argv[])
 	printf_s("\n");
 
 	// Hack the universe.
+	DWORD proc_id = NULL;
 
-	printf_s("\n\nPlease open Minecraft Education Edition\n");
-	while (hWnd == NULL)
+	printf_s("\nPlease open Minecraft Education Edition\n");
+	while (proc_id == NULL)
 	{
-		hWnd = FindWindow(0, L"Minecraft: Education Edition");
+		proc_id = GetProcId(L"Minecraft.Windows.exe");
+		if (proc_id == NULL)
+			proc_id = GetProcId(L"Minecraft.Win10.DX11.exe");
 	}
-	printf_s("MCEE Window Handle: %x\n", hWnd);
-	DWORD proc_id;
-	GetWindowThreadProcessId(hWnd, &proc_id);
+
 	printf_s("MCEE Process ID: %x\n", proc_id);
 	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, TRUE, proc_id);
 	printf_s("MCEE Process Handle: %x\n", hProcess);
-
-	uintptr_t baseAddress = (uintptr_t)GetProcessBaseAddress(proc_id);
-	printf_s("MCEE Base Addr: %llx\n", baseAddress);
 	
 	if (!hProcess)
 	{
@@ -185,22 +206,32 @@ int main(int argc, char* argv[])
 	else
 	{
 
+		uintptr_t baseAddress = NULL;
+	    while(baseAddress == NULL)
+			baseAddress = (uintptr_t)GetProcessBaseAddress(proc_id);
+		
+		printf_s("MCEE Base Addr: %llx\n", baseAddress);
+
+
 		printf_s("Waiting for game to initalize....\n");
 
-		read_ptr_path:
+	read_ptr_path:
+
+		baseAddress = (uintptr_t)GetProcessBaseAddress(proc_id); // recalculate base address idk why but this seems to be required.
+		
 
 		// Read first ptr
-		"weird compiler shiz right here..";
-
-		uintptr_t cur_ptr = baseAddress + pointer_path[0];
+		uintptr_t first_ptr = pointer_path[0];
+		uintptr_t cur_ptr = baseAddress + first_ptr;
 		uintptr_t ptr = 0;
 		uintptr_t new_ptr = 0;
 
 
-		while (ptr == 0)
-		{
-		    ReadProcessMemory(hProcess, cur_ptr, &ptr, sizeof(uintptr_t), 0);
-		}
+
+		ReadProcessMemory(hProcess, cur_ptr, &ptr, sizeof(uintptr_t), 0);
+		if (ptr == 0)
+			goto read_ptr_path;
+		
 		
 		for (int i = 1; i < num_ptr-1; i++) // Follow path...
 		{
@@ -234,11 +265,17 @@ int main(int argc, char* argv[])
 				goto finish;
 			}
 
-			printf_s("Trying login stage 6...\n"); // Backwards Comp (1.9 and lower)
-			int login_step_value = 6;
+			printf_s("Trying login stage 5...\n"); // Backwards Comp (0.xx)
+			int login_step_value = 5;
 			WriteProcessMemory(hProcess, (void*)ptr, &login_step_value, sizeof(int), 0);
 
-			Sleep(1 * 500);
+			Sleep(1 * 200);
+
+			printf_s("Trying login stage 6...\n"); // Backwards Comp (1.9 and lower)
+			login_step_value = 6;
+			WriteProcessMemory(hProcess, (void*)ptr, &login_step_value, sizeof(int), 0);
+
+			Sleep(1 * 200);
 
 			printf_s("Trying login stage 8...\n");
 			login_step_value = 8;
