@@ -8,11 +8,7 @@
 int* pointer_path;
 int num_ptr;
 
-#ifdef _WIN64
-unsigned long long int GetProcessBaseAddress(HANDLE process) // from stackoverflow
-#else
-unsigned int GetProcessBaseAddress(HANDLE process) // from stackoverflow
-#endif
+uintptr_t GetProcessBaseAddress(HANDLE process) // from stackoverflow
 {
 	DWORD_PTR   baseAddress = 0;
 	HANDLE      processHandle = OpenProcess(PROCESS_ALL_ACCESS,TRUE,process);
@@ -33,11 +29,7 @@ unsigned int GetProcessBaseAddress(HANDLE process) // from stackoverflow
 					int moduleCount;
 
 					moduleCount = bytesRequired / sizeof(HMODULE);
-					#ifdef _WIN64
-					moduleArray = (unsigned int*)moduleArrayBytes;
-					#else
-					moduleArray = (unsigned long long int*)moduleArrayBytes;
-					#endif
+					moduleArray = (uintptr_t*)moduleArrayBytes;
 
 
 					if (EnumProcessModules(processHandle, moduleArray, bytesRequired, &bytesRequired))
@@ -61,19 +53,38 @@ int main(int argc, char* argv[])
 	HWND hWnd = NULL;
 	FILE* ptr_file;
 	char MEE_POINTER_FILE[0x2048];
+	int LOGIN_STEP_VALUE = -1;
+
+	char* tmp;
+
 	#ifdef _WIN64
 	printf_s("!!! x64 Version can ONLY be used for the 64 Bit Versions of the game!\n");
 	#else
 	printf_s("!!! x86 Version can ONLY be used for the 32 Bit Versions of the game!\n");
 	#endif
+	
+	strncpy_s(MEE_POINTER_FILE, 0x2048, "mee.ptr", 0x2048);
+    if(argc > 1)
+	{
+		for (int i = 0; i < argc; i++)
+		{
 
-	if (argc == 1)
-	{
-		strncpy_s(MEE_POINTER_FILE, 0x2048, "mee.ptr", 0x2048);
-	}
-	else
-	{
-		strncpy_s(MEE_POINTER_FILE, 0x2048, argv[1], 0x2048);
+			if (strcmp(argv[i], "--help") == 0)
+			{
+				printf_s("--ptr <mee.ptr file>\n");
+				printf_s("--lstep <custom login step value>\n");
+				return;
+			}
+
+			if(strcmp(argv[i],"--ptr") == 0)
+				strncpy_s(MEE_POINTER_FILE, 0x2048, argv[i+1], 0x2048);
+
+			if (strcmp(argv[i], "--lstep") == 0)
+				LOGIN_STEP_VALUE = strtol(argv[i + 1], &tmp, 10);
+
+		}
+
+		printf_s("MEE.PTR FILE : %s\nLOGIN STEP VALUE: %i\n", MEE_POINTER_FILE, LOGIN_STEP_VALUE);
 	}
 
 	// Read text file
@@ -108,7 +119,6 @@ int main(int argc, char* argv[])
 		memcpy_s(work_buf, sz, file_contents, sz);
 
 		char* next_token2 = NULL;
-		char* tmp;
 
 		char* ptrs = strtok_s(work_buf, " > ",&next_token2);
 		pointer_path[0] = (int)strtol(ptrs, &tmp, 16);
@@ -164,13 +174,9 @@ int main(int argc, char* argv[])
 	printf_s("MCEE Process ID: %x\n", proc_id);
 	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, TRUE, proc_id);
 	printf_s("MCEE Process Handle: %x\n", hProcess);
-	#ifdef _WIN64
-	long long int baseAddress = (long long int)GetProcessBaseAddress(proc_id);
+
+	uintptr_t baseAddress = (uintptr_t)GetProcessBaseAddress(proc_id);
 	printf_s("MCEE Base Addr: %llx\n", baseAddress);
-	#else
-	int baseAddress = (int)GetProcessBaseAddress(proc_id);
-	printf_s("MCEE Base Addr: %x\n", baseAddress);
-	#endif
 	
 	if (!hProcess)
 	{
@@ -178,79 +184,78 @@ int main(int argc, char* argv[])
 	}
 	else
 	{
+
+		printf_s("Waiting for game to initalize....\n");
+
+		read_ptr_path:
+
 		// Read first ptr
-		printf_s("Waiting for game to Initalize.\n");
-         #ifdef _WIN64
-		long long int cur_ptr = baseAddress + pointer_path[0];
-		long long int ptr = 0;
-		long long int new_ptr = 0;
-		#else
-		int cur_ptr = baseAddress + pointer_path[0];
-		int ptr = 0;
-		int new_ptr = 0;
-		#endif
+		"weird compiler shiz right here..";
+
+		uintptr_t cur_ptr = baseAddress + pointer_path[0];
+		uintptr_t ptr = 0;
+		uintptr_t new_ptr = 0;
+
 
 		while (ptr == 0)
 		{
-            #ifdef _WIN64
-		    ReadProcessMemory(hProcess, cur_ptr, &ptr, sizeof(long long int), 0);
-			#else
-			ReadProcessMemory(hProcess, cur_ptr, &ptr, sizeof(int), 0);
-			#endif
+		    ReadProcessMemory(hProcess, cur_ptr, &ptr, sizeof(uintptr_t), 0);
 		}
 		
-		printf_s("Pointer 1: %x == %x\n", cur_ptr, ptr);
-
 		for (int i = 1; i < num_ptr-1; i++) // Follow path...
 		{
 
 
 			cur_ptr = ptr + pointer_path[i];
-			#ifdef _WIN64
-			ReadProcessMemory(hProcess, cur_ptr, &new_ptr, sizeof(long long int), 0);
-			#else
-			ReadProcessMemory(hProcess, cur_ptr, &new_ptr, sizeof(int), 0);
-			#endif
+			ReadProcessMemory(hProcess, cur_ptr, &new_ptr, sizeof(uintptr_t), 0);
 			if (new_ptr == 0) {
 				i -= 1;
-				continue;
+				goto read_ptr_path;
 			}
 			else
 			{
 				ptr = new_ptr;
+				
 			}
 				
 
-			printf_s("Pointer %i: %x == %x\n", i, cur_ptr, ptr);
 		}
 
 		// Wait for 0x1
-		printf_s("Waiting for login screen.\n");
-		int login_stage = 0;
+		int login_step_value = 0;
+		ReadProcessMemory(hProcess, (void*)ptr, &login_step_value, sizeof(int), 0);
 
-		while (1)
+		if (login_step_value != 0x0)
 		{
-			ReadProcessMemory(hProcess, (void*)ptr, &login_stage, sizeof(int), 0);
-			if (login_stage == 0x1 || login_stage == 0x4)
+			if (LOGIN_STEP_VALUE != -1)
 			{
-				printf_s("Trying login stage 6...\n"); // Backwards Comp (1.9 and lower)
-				int login_success = 6;
-				WriteProcessMemory(hProcess, (void*)ptr, &login_success, sizeof(int), 0);
-
-				Sleep(1 * 500);
-
-				printf_s("Trying login stage 8...\n");
-				login_success = 8;
-				WriteProcessMemory(hProcess, (void*)ptr, &login_success, sizeof(int), 0);
-
-				break;
+				printf_s("Trying login stage %i", LOGIN_STEP_VALUE);
+				WriteProcessMemory(hProcess, (void*)ptr, &LOGIN_STEP_VALUE, sizeof(int), 0);
+				goto finish;
 			}
+
+			printf_s("Trying login stage 6...\n"); // Backwards Comp (1.9 and lower)
+			int login_step_value = 6;
+			WriteProcessMemory(hProcess, (void*)ptr, &login_step_value, sizeof(int), 0);
+
+			Sleep(1 * 500);
+
+			printf_s("Trying login stage 8...\n");
+			login_step_value = 8;
+			WriteProcessMemory(hProcess, (void*)ptr, &login_step_value, sizeof(int), 0);
+
 		}
+		else
+		{
+			goto read_ptr_path;
+		}
+
+		finish:
+		
 
 		CloseHandle(hProcess);
 
 		printf_s("\nBlessed Be!\n");
-		Sleep(5 * 1000);
 		return 0;
 	}
 }
