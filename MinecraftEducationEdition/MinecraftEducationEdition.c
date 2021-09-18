@@ -159,18 +159,14 @@ int main(int argc, char* argv[])
 	}
 	else
 	{
-		printf_s("Failed, using default pointer path (MCEE 1.12.60 UWP x64)\n");
-		num_ptr = 8;
+		printf_s("Failed, using default pointer path (MCEE 1.14.70 UWP x64)\n");
+		num_ptr = 4;
 		pointer_path = (int*)malloc(num_ptr * sizeof(int));
         
-		pointer_path[0] = 0x2CFFF40;
-		pointer_path[1] = 0x30;
-		pointer_path[2] = 0x8;
-		pointer_path[3] = 0x20;
-		pointer_path[4] = 0x570;
-		pointer_path[5] = 0x18;
-		pointer_path[6] = 0xA8;
-		pointer_path[7] = 0x0;
+		pointer_path[0] = 0x2D98F08;
+		pointer_path[1] = 0x0;
+		pointer_path[2] = 0x560;
+		pointer_path[3] = 0x0;
 	}
 
 	printf_s("\nPointer Path: ");
@@ -209,8 +205,11 @@ int main(int argc, char* argv[])
 		uintptr_t baseAddress = NULL;
 	    while(baseAddress == NULL)
 			baseAddress = (uintptr_t)GetProcessBaseAddress(proc_id);
-		
+#ifdef _WIN64
 		printf_s("MCEE Base Addr: %llx\n", baseAddress);
+#else
+		printf_s("MCEE Base Addr: %x\n", baseAddress);
+#endif
 
 
 		printf_s("Waiting for game to initalize....\n");
@@ -236,7 +235,6 @@ int main(int argc, char* argv[])
 		for (int i = 1; i < num_ptr-1; i++) // Follow path...
 		{
 
-
 			cur_ptr = ptr + pointer_path[i];
 			ReadProcessMemory(hProcess, cur_ptr, &new_ptr, sizeof(uintptr_t), 0);
 			if (new_ptr == 0) {
@@ -252,12 +250,20 @@ int main(int argc, char* argv[])
 
 		}
 
+		ptr += pointer_path[num_ptr-1]; // final addition
+#ifdef _WIN64
+		printf_s("Final Ptr: 0x%llx\n", ptr);
+#else
+		printf_s("Final Ptr: 0x%x\n", ptr);
+#endif
+
 		// Wait for 0x1
 		int login_step_value = 0;
 		ReadProcessMemory(hProcess, (void*)ptr, &login_step_value, sizeof(int), 0);
 
 		if (login_step_value != 0x0)
 		{
+			printf_s("Current Login Step: %i\n", ptr, login_step_value);
 			if (LOGIN_STEP_VALUE != -1)
 			{
 				printf_s("Trying login stage %i", LOGIN_STEP_VALUE);
