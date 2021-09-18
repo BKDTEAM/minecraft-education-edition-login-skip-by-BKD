@@ -24,7 +24,7 @@
     <ProjectGuid>{917b2aeb-964d-4499-8108-4e356c91d5e9}</ProjectGuid>
     <RootNamespace>MinecraftEducationEdition</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>MinecraftEducationEdition</ProjectName>
+    <ProjectName>MinecraftEducationEditionLoginSkip</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">

@@ -251,11 +251,6 @@ int main(int argc, char* argv[])
 		}
 
 		ptr += pointer_path[num_ptr-1]; // final addition
-#ifdef _WIN64
-		printf_s("Final Ptr: 0x%llx\n", ptr);
-#else
-		printf_s("Final Ptr: 0x%x\n", ptr);
-#endif
 
 		// Wait for 0x1
 		int login_step_value = 0;
@@ -263,6 +258,12 @@ int main(int argc, char* argv[])
 
 		if (login_step_value != 0x0)
 		{
+#ifdef _WIN64
+			printf_s("Final Ptr: 0x%llx\n", ptr);
+#else
+			printf_s("Final Ptr: 0x%x\n", ptr);
+#endif
+
 			printf_s("Current Login Step: %i\n", ptr, login_step_value);
 			if (LOGIN_STEP_VALUE != -1)
 			{
