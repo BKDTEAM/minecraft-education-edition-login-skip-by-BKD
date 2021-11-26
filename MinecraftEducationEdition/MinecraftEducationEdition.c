@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
+#include <io.h>
 #include <psapi.h>
 #include <wchar.h>
 #include <string.h>
@@ -10,16 +11,24 @@
 int* pointer_path;
 int num_ptr;
 
-uintptr_t GetProcessBaseAddress(HANDLE process) // from stackoverflow
+/*
+*	Gets the base address of the main module for any process id
+*	I totally didnt steal this from StackOverflow.
+*/
+uintptr_t GetProcessBaseAddress(DWORD processId)
 {
-	DWORD_PTR   baseAddress = 0;
-	HANDLE      processHandle = OpenProcess(PROCESS_ALL_ACCESS,TRUE,process);
+	/*
+	*	Open the process
+	*/
+	uintptr_t   baseAddress = 0; 
+	HANDLE      processHandle = OpenProcess(PROCESS_ALL_ACCESS, TRUE, processId); 
 	HMODULE*    moduleArray;
 	LPBYTE      moduleArrayBytes;
 	DWORD       bytesRequired;
 
 	if (processHandle)
 	{
+		// Enumarate through all process modules
 		if (EnumProcessModules(processHandle, NULL, 0, &bytesRequired))
 		{
 			if (bytesRequired)
@@ -31,12 +40,13 @@ uintptr_t GetProcessBaseAddress(HANDLE process) // from stackoverflow
 					int moduleCount;
 
 					moduleCount = bytesRequired / sizeof(HMODULE);
-					moduleArray = (uintptr_t*)moduleArrayBytes;
+					moduleArray = (HMODULE*)moduleArrayBytes;
 
 
+					// Get the first module in the process (main exe)
 					if (EnumProcessModules(processHandle, moduleArray, bytesRequired, &bytesRequired))
 					{
-						baseAddress = moduleArray[0];
+						baseAddress = (uintptr_t)(moduleArray[0]);
 					}
 
 					LocalFree(moduleArrayBytes);
@@ -50,17 +60,27 @@ uintptr_t GetProcessBaseAddress(HANDLE process) // from stackoverflow
 	return baseAddress;
 }
 
+/*
+*	Obtains a process id from 
+*	a given executable name
+*	(eg, Minecraft.Windows.exe)
+*	Returns NULL if not found.
+*/
 DWORD GetProcId(WCHAR* name)
 {
 	PROCESSENTRY32 entry;
 	entry.dwSize = sizeof(PROCESSENTRY32);
 
-	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL);
+	// Save a snapshot of all open processes
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 
+	// Get the first process
 	if (Process32First(snapshot, &entry) == TRUE)
 	{
+		// Enumerate through all processes
 		while (Process32Next(snapshot, &entry) == TRUE)
 		{
+			// Check if the file name matches
 			if (wcscmp(entry.szExeFile, name) == 0)
 			{
 				return entry.th32ProcessID;
@@ -68,10 +88,14 @@ DWORD GetProcId(WCHAR* name)
 		}
 	}
 
+	// Remove the snapshot.
 	CloseHandle(snapshot);
-	return NULL;
+	return 0;
 }
 
+/*
+*	Entry Point - Runs when the program starts
+*/
 int main(int argc, char* argv[])
 {
 	FILE* ptr_file;
@@ -79,15 +103,22 @@ int main(int argc, char* argv[])
 	int LOGIN_STEP_VALUE = -1;
 
 	char* tmp;
-
 	#ifdef _WIN64
-	printf_s("!!! x64 Version can ONLY be used for the 64 Bit Versions of the game!\n");
+		printf_s("!!! x64 Version can ONLY be used for the 64 Bit Versions of the game!\n");
 	#else
-	printf_s("!!! x86 Version can ONLY be used for the 32 Bit Versions of the game!\n");
+		printf_s("!!! x86 Version can ONLY be used for the 32 Bit Versions of the game!\n");
 	#endif
 	
+	/*
+	*	Check for command line arguments:
+	* 
+	*	--help - Shows list of commands
+	*	--ptr - Sets the filename to read pointer paths from
+	*	--lstep - What to set the login step value to.
+	*/
+
 	strncpy_s(MEE_POINTER_FILE, 0x2048, "mee.ptr", 0x2048);
-    if(argc > 1)
+	if(argc > 1)
 	{
 		for (int i = 0; i < argc; i++)
 		{
@@ -110,133 +141,240 @@ int main(int argc, char* argv[])
 		printf_s("MEE.PTR FILE : %s\nLOGIN STEP VALUE: %i\n", MEE_POINTER_FILE, LOGIN_STEP_VALUE);
 	}
 
-	// Read text file
+	/*
+	*	Parse Pointer Path File (mee.ptr)
+	*	ASCII Hex Numbers, seperated by " > "
+	*	And converts it to a array of intergers.
+	*/
 	printf_s("Loading %s\n", MEE_POINTER_FILE);
-	if ((access(MEE_POINTER_FILE, 0)) != -1)
+	if ((_access(MEE_POINTER_FILE, 0)) != -1) // If the mee.ptr file exists AND the process has permission to read it..
 	{
+		// Open the pointer file
 		fopen_s(&ptr_file, MEE_POINTER_FILE, "r");
+
+		/*
+		*	This next part just gets the size
+		*	of mee.ptr file
+		*/
+
+		// Seek to the end of the file
 		fseek(ptr_file, 0, SEEK_END);
+		// Get the current position
 		int sz = ftell(ptr_file)+1;
+		// Seek to the start of the file
 		fseek(ptr_file, 0, SEEK_SET);
 
+		/*
+		*	Allocate a buffer the size of mee.ptr
+		*	then read the contents of the mee.ptr file
+		*	into that buffer
+		*/
+		
+		// Allocate (sz) bytes of memory for the buffer.
 		char* file_contents = (char*)malloc(sz);
+		// Set the newly allocated buffer to all 0x00
 		memset(file_contents, 0x00, sz);
+		// Read the contents of mee.ptr into the buffer.
 		fread(file_contents, sz, 1, ptr_file);
 
+		/*
+		*	Create a copy of the pointer path file buffer
+		*	This is so we can scan through and mess with the pointers to it
+		*	Without messing up the our original copy
+		*/
+		
+		// Allocate (sz) bytes of memory for the buffer
 		char* work_buf = (char*)malloc(sz);
+		// Copy contents of previously read file into the new buffer
 		memcpy_s(work_buf, sz, file_contents, sz);
 
-		num_ptr = 0;
-		char* next_token1 = NULL;
+		/*
+		*	Count the total number of elements
+		*	From mee.ptr file.
+		*/
+
+		// Set the total number of elements in the pointer path to 0
+		num_ptr = 0; 
+
+		// Pointer to the next element, NULL for now.
+		char* next_token1 = NULL; 
+
+		// Get a pointer to the first occurance of " > "
 		char* token = strtok_s(work_buf, " > ", &next_token1);
 
-		// Count number of ptrs
-		while (token != NULL) {
+		// Repeat this until there is no more " > " left
+		while (token != NULL) { 
+			// Get the pointer to the next " > ".
 			token = strtok_s(NULL, " > ",&next_token1);
-			num_ptr += 1;
+			// Add 1 to the total number of elements
+			num_ptr ++;
 		}
 
-		pointer_path = (int*)malloc(num_ptr * sizeof(int));
+		// Free up memory used for counting the list of elements
+		free(work_buf);
 
+		/*
+		*	Create a new 2nd copy of the pointer path file buffer
+		*/
+
+		// Allocate buffer the size of the mee.ptr file
 		work_buf = (char*)malloc(sz);
+		// Copy contents of mee.ptr file into new buffer
 		memcpy_s(work_buf, sz, file_contents, sz);
 
-		char* next_token2 = NULL;
+		/*
+		*	Allocate the memory required for the interger array
+		*	Then convert each ASCII Hex Code to an int
+		*	And store it in the pointer paths array.
+		*/
 
+		// Allocate memory buffer the size of the required int array
+		pointer_path = (int*)malloc(num_ptr * sizeof(int));
+
+		// Pointer to the next element, NULL for now.
+		char* next_token2 = NULL;
+		// Get the pointer to the first element (seperated by " > ")
 		char* ptrs = strtok_s(work_buf, " > ",&next_token2);
+		// Convert the ascii string to a int value, and put it into the int array
 		pointer_path[0] = (int)strtol(ptrs, &tmp, 16);
 
-		// Use ptr
-		
+		// Repeat until read all pointers
 		for(int i = 1; i < num_ptr; i++){
+			// Read the next element (seperated by " > ")
 			ptrs = strtok_s(NULL, " > ", &next_token2);
+			// Convert the ascii string to a int value, and put it into the int array
 			pointer_path[i] = (int)strtol(ptrs, &tmp, 16);
 		}
 
+		// Finally close the mee.ptr file
 		fclose(ptr_file);
+
+		// Free up memory used for reading the list of elements
+		free(work_buf);
+		// Free up memory used for the file contents
+		free(file_contents);
 
 		printf_s("Loaded %s!\n", MEE_POINTER_FILE);
 	}
-	else
+	else // If no mee.ptr file is found ... OR the process dont have permission to read it
 	{
-		printf_s("Failed, using default pointer path (MCEE 1.14.70 UWP x64)\n");
-		num_ptr = 4;
+		// Set number of elements to a default number
+		num_ptr = 8;
+		// Allocate enough space for an int array of that size
 		pointer_path = (int*)malloc(num_ptr * sizeof(int));
-        
-		pointer_path[0] = 0x2D98F08;
-		pointer_path[1] = 0x0;
-		pointer_path[2] = 0x560;
-		pointer_path[3] = 0x0;
+		#ifdef _WIN64 // This code is only included if the project is built as win64 version
+			printf_s("Failed, using default pointer path (MCEE 1.17.30 UWP x64)\n");
+			// Use a default pointer path.
+			pointer_path[0] = 0x3607D48;
+			pointer_path[1] = 0x0;
+			pointer_path[2] = 0x50;
+			pointer_path[3] = 0xA8;
+			pointer_path[4] = 0xE8;
+			pointer_path[5] = 0x0;
+			pointer_path[6] = 0x630;
+			pointer_path[7] = 0x10;
+		#else // if its NOT the win64 version..
+			printf_s("Failed, using default pointer path (MCEE 1.17.30 Win32 x86)\n");
+			// Use a default pointer path.
+			pointer_path[0] = 0x2CBF0FC;
+			pointer_path[1] = 0x0;
+			pointer_path[2] = 0x7C;
+			pointer_path[3] = 0x0;
+			pointer_path[4] = 0x68;
+			pointer_path[5] = 0xC;
+			pointer_path[6] = 0x2E4;
+			pointer_path[7] = 0x8;
+		#endif
 	}
 
-	printf_s("\nPointer Path: ");
-	for (int i = 0; i < num_ptr; i++)
+	/*
+	*	Print the currently in use
+	*	pointer path to the output of the terminal
+	*/
+
+	// Print "Pointer Path: "
+	printf_s("\nPointer Path: "); 
+	for (int i = 0; i < num_ptr; i++) // Repeat for all elements in the path
 	{
-		printf_s("%x", pointer_path[i]);
-		if (i != num_ptr - 1)
+		// Print the hex encoding of the current element
+		printf_s("%x", pointer_path[i]); 
+		if (i != num_ptr - 1) // if its not the last element
 		{
-			printf_s(" > ");
+			// Print " > "
+			printf_s(" > "); 
 		}
 	}
-	printf_s("\n");
+	// Print a newline
+	printf_s("\n"); 
 
-	// Hack the universe.
-	DWORD proc_id = NULL;
-
-	printf_s("\nPlease open Minecraft Education Edition\n");
-	while (proc_id == NULL)
-	{
-		proc_id = GetProcId(L"Minecraft.Windows.exe");
-		if (proc_id == NULL)
-			proc_id = GetProcId(L"Minecraft.Win10.DX11.exe");
-	}
-
-	printf_s("MCEE Process ID: %x\n", proc_id);
-	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, TRUE, proc_id);
-	printf_s("MCEE Process Handle: %x\n", hProcess);
+	/*
+	*	This part is the part that actually patches
+	*	Education edition's memory space
+	*/
 	
-	if (!hProcess)
+	// Process ID of minecraft educattion ediion application, (currently 0)
+	DWORD proc_id = 0;
+	printf_s("\nPlease open Minecraft Education Edition\n");
+
+	/*
+	*	Repeatidly check if "Minecraft.Windows.exe" or "Minecraft.Win10.DX11.exe" is open
+	*/ 
+	while (proc_id == 0)
 	{
+		proc_id = GetProcId(L"Minecraft.Windows.exe"); // Try to get the process ID for "Minecraft.Windows"
+		if (proc_id == 0) // If the process ID is NULL (process not found)
+			proc_id = GetProcId(L"Minecraft.Win10.DX11.exe"); // Try to get the process ID for "Minecrat.Win10.DX11.exe"
+	}
+	// Print the process ID
+	printf_s("MCEE Process ID: %x\n", proc_id);
+	// Try to open the process.
+	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, TRUE, proc_id);
+	// Print the process handle
+	printf_s("MCEE Process Handle: 0x%p\n", hProcess);
+	
+	if (!hProcess) // If failed to open the process (eg no permission)
+	{
+		// Display a message box saying to try with admin rights
 		MessageBox(NULL, L"Cannot open process!\r\nTry \"Run as administrator\"", L"Error!", MB_OK + MB_ICONERROR);
 	}
 	else
 	{
+		// Base Address of the minecraft education edition process (NULL for now)
+		uintptr_t baseAddress = 0;
+	    while(baseAddress == 0) // Repeat until the base address is not NULL.
+			// Try to get the base address of the Minecraft Education Edition Process
+			baseAddress = GetProcessBaseAddress(proc_id); 
 
-		uintptr_t baseAddress = NULL;
-	    while(baseAddress == NULL)
-			baseAddress = (uintptr_t)GetProcessBaseAddress(proc_id);
-#ifdef _WIN64
-		printf_s("MCEE Base Addr: %llx\n", baseAddress);
-#else
-		printf_s("MCEE Base Addr: %x\n", baseAddress);
-#endif
-
-
+		printf_s("MCEE Base Addr: 0x%p\n", (void*)baseAddress);
 		printf_s("Waiting for game to initalize....\n");
 
 	read_ptr_path:
 
-		baseAddress = (uintptr_t)GetProcessBaseAddress(proc_id); // recalculate base address idk why but this seems to be required.
+		// recalculate base address idk why but this seems to be required.
+		baseAddress = GetProcessBaseAddress(proc_id); 
 		
 
-		// Read first ptr
+		// Read first element
 		uintptr_t first_ptr = pointer_path[0];
 		uintptr_t cur_ptr = baseAddress + first_ptr;
 		uintptr_t ptr = 0;
 		uintptr_t new_ptr = 0;
 
-
-
-		ReadProcessMemory(hProcess, cur_ptr, &ptr, sizeof(uintptr_t), 0);
+		// Read first element from the games memory
+		ReadProcessMemory(hProcess, (LPCVOID)cur_ptr, &ptr, sizeof(uintptr_t), 0);
 		if (ptr == 0)
 			goto read_ptr_path;
 		
 		
-		for (int i = 1; i < num_ptr-1; i++) // Follow path...
+		/*
+		*	Follow all elements
+		*	in the path, until you reach
+		*	the pointer to the login step value.
+		*/
+		for (int i = 1; i < num_ptr-1; i++)
 		{
-
 			cur_ptr = ptr + pointer_path[i];
-			ReadProcessMemory(hProcess, cur_ptr, &new_ptr, sizeof(uintptr_t), 0);
+			ReadProcessMemory(hProcess, (LPCVOID)cur_ptr, &new_ptr, sizeof(uintptr_t), 0);
 			if (new_ptr == 0) {
 				i -= 1;
 				goto read_ptr_path;
@@ -246,53 +384,47 @@ int main(int argc, char* argv[])
 				ptr = new_ptr;
 				
 			}
-				
-
 		}
 
-		ptr += pointer_path[num_ptr-1]; // final addition
+		// final addition
+		ptr += pointer_path[num_ptr-1]; 
 
-		// Wait for 0x1
+		// Wait for Welcome Screen.
 		int login_step_value = 0;
-		ReadProcessMemory(hProcess, (void*)ptr, &login_step_value, sizeof(int), 0);
+		ReadProcessMemory(hProcess, (LPCVOID)ptr, &login_step_value, sizeof(int), 0);
 
 		if (login_step_value != 0x0)
 		{
-#ifdef _WIN64
-			printf_s("Final Ptr: 0x%llx\n", ptr);
-#else
-			printf_s("Final Ptr: 0x%x\n", ptr);
-#endif
 
-			printf_s("Current Login Step: %i\n", ptr, login_step_value);
+			printf_s("Final Ptr: 0x%p\n", (void*)ptr);
+
+			printf_s("Current Login Step: %i\n", login_step_value);
 			if (LOGIN_STEP_VALUE != -1)
 			{
 				printf_s("Trying login stage %i", LOGIN_STEP_VALUE);
-				WriteProcessMemory(hProcess, (void*)ptr, &LOGIN_STEP_VALUE, sizeof(int), 0);
+				WriteProcessMemory(hProcess, (LPVOID)ptr, &LOGIN_STEP_VALUE, sizeof(int), 0);
 				goto finish;
 			}
 
 			printf_s("Trying login stage 5...\n"); // Backwards Comp (0.xx)
 			int login_step_value = 5;
-			WriteProcessMemory(hProcess, (void*)ptr, &login_step_value, sizeof(int), 0);
+			WriteProcessMemory(hProcess, (LPVOID)ptr, &login_step_value, sizeof(int), 0);
 
 			Sleep(1 * 200);
 
 			printf_s("Trying login stage 6...\n"); // Backwards Comp (1.9 and lower)
 			login_step_value = 6;
-			WriteProcessMemory(hProcess, (void*)ptr, &login_step_value, sizeof(int), 0);
+			WriteProcessMemory(hProcess, (LPVOID)ptr, &login_step_value, sizeof(int), 0);
 
 			Sleep(1 * 200);
 
 			printf_s("Trying login stage 8...\n");
 			login_step_value = 8;
-			WriteProcessMemory(hProcess, (void*)ptr, &login_step_value, sizeof(int), 0);
+			WriteProcessMemory(hProcess, (LPVOID)ptr, &login_step_value, sizeof(int), 0);
 
 		}
 		else
-		{
 			goto read_ptr_path;
-		}
 
 		finish:
 		
